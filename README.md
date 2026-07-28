@@ -63,31 +63,29 @@ export ANTHROPIC_API_KEY=...      # 토큰 없이 API 키만 있으면 됨
 python threads_post.py --dry-run  # 오늘 요일 기준으로 생성
 ```
 
-## 현재 상태 (2026-07-29)
+## 현재 상태 — 발행 대기 (2026-07-29)
 
 | 항목 | 상태 |
 |---|---|
 | 코드·워크플로우·문서 | ✅ |
 | 글 생성 (dry-run 검증) | ✅ 존댓말·번호형·이모지0, 홍보 버전 포함 |
-| 저장소 `scalemaker-ship-it/ai-leeseul-threads` | ⏳ 생성·푸시 |
-| `ANTHROPIC_API_KEY` 시크릿 | ⏳ |
-| `THREADS_USER_ID` / `THREADS_ACCESS_TOKEN` 시크릿 | ⏳ **토큰 발급 필요** |
+| 저장소 `scalemaker-ship-it/ai-leeseul-threads` | ✅ 생성·푸시 |
+| `ANTHROPIC_API_KEY` 시크릿 | ✅ |
+| `THREADS_USER_ID` (`27379182415114797`) / `THREADS_ACCESS_TOKEN` 시크릿 | ✅ **등록 완료** |
+| 실제 첫 발행 | ⏳ 미실행 (다음 저녁 크론에 자동, 또는 수동 트리거) |
 
-### 토큰 발급 (빵찌 자동화와 동일한 방식)
+**세팅 완료 — 다음 저녁 크론(월~토 20:00~21:00 KST)에 자동으로 첫 글이 올라갑니다.**
+즉시 테스트하려면: Actions 탭 → **Run workflow**(dry_run 체크 해제) 또는
+`gh workflow run threads-daily.yml --repo scalemaker-ship-it/ai-leeseul-threads`.
 
-무인 발행에는 `@ai_leeseul` 계정의 Threads 장기 토큰이 필요합니다.
+### Meta 앱 정보 (토큰 재발급 시 참고)
 
-1. Meta 개발자 콘솔에 **Threads API 이용 사례** 앱을 만들고(또는 기존 앱 사용),
-   `@ai_leeseul`을 **Threads 테스터로 추가**합니다.
-2. 브라우저에서 `@ai_leeseul`로 Threads 로그인 후, 토큰 생성기에서 장기 토큰 발급.
-   (팝업이 막히면 `window.open` 후킹으로 authorize URL을 가로채 같은 탭에서 여는
-   방식으로 우회 — `빵찌스레드자동화/README.md`의 절차와 동일)
-3. USER_ID 조회 후 시크릿 등록:
-   ```bash
-   curl -s "https://graph.threads.net/v1.0/me?fields=id,username&access_token=<토큰>"
-   gh secret set THREADS_ACCESS_TOKEN --repo scalemaker-ship-it/ai-leeseul-threads
-   gh secret set THREADS_USER_ID      --repo scalemaker-ship-it/ai-leeseul-threads
-   ```
-4. Actions 탭 → **Run workflow** 로 즉시 1회 테스트.
-
-> Threads 토큰은 약 60일 후 만료 — 만료 시 2~3단계 재수행.
+- 앱 이름: **이슬_자동화**, 앱 ID `1327618752693437`, Threads 앱 ID `1401596085180537`
+- `@ai_leeseul` = Threads 테스터(수락 완료). 권한 `threads_basic` + `threads_content_publish`.
+- 토큰은 약 60일 후 만료. 재발급 절차는 `빵찌스레드자동화/README.md`와 동일
+  (토큰 생성기 버튼의 `window.open` 후킹 → authorize URL 가로채 같은 탭에서 열기
+  → 콜백 페이지 HTML에서 토큰 추출). USER_ID 재확인:
+  ```bash
+  curl -s "https://graph.threads.net/v1.0/me?fields=id,username&access_token=<토큰>"
+  gh secret set THREADS_ACCESS_TOKEN --repo scalemaker-ship-it/ai-leeseul-threads
+  ```
