@@ -1,0 +1,52 @@
+name: 이슬(@ai_leeseul) 스레드 자동 게시 (하루 1회)
+
+# 하루 1회, 저녁 발행. 월~토 게시, 일요일은 스크립트가 스스로 쉼.
+# GitHub Actions 크론은 UTC 기준 (KST = UTC+9).
+#   목표 노출: 21:00 KST 무렵.  21:00 KST = 12:00 UTC → "0 12 * * 1-6"
+#
+# GitHub 무료 러너의 스케줄 크론은 혼잡 시 수십 분~수 시간 늦게 뜰 수 있다.
+# 자정을 넘겨 일요일로 넘어가면 스크립트가 '일요일 쉼'으로 스킵되므로,
+# 지연이 심해도 같은 날 안에 발행되도록 크론을 20:00 KST(11:00 UTC)로 당겨 두고
+# 시작 직후 0~60분 랜덤 지연으로 20:00~21:00 사이에 분산 발행한다.
+on:
+  schedule:
+    - cron: "0 11 * * 1-6"   # 20:00 KST, 월~토
+  workflow_dispatch:          # 수동 실행 버튼
+    inputs:
+      dry_run:
+        description: "게시하지 않고 글 생성만 검증 (토큰 불필요)"
+        type: boolean
+        default: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      # 크론 실행일 때만 랜덤 지연 (수동 실행은 즉시)
+      - name: 랜덤 지연 (게시 시각 분산)
+        if: github.event_name == 'schedule'
+        run: |
+          DELAY=$((RANDOM % 3600))   # 0~60분
+          echo "약 $((DELAY / 60))분 대기 후 게시합니다."
+          sleep $DELAY
+
+      - name: 스레드 게시
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python threads_post.py --dry-run
+          else
+            python threads_post.py
+          fi
