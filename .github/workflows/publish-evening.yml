@@ -18,6 +18,10 @@ on:
         description: "토큰 유효성만 확인(게시 안 함)"
         type: boolean
         default: false
+      file:
+        description: "발행할 원고 파일(비우면 oneoff_post.txt)"
+        type: string
+        default: oneoff_post.txt
 
 jobs:
   publish:
@@ -37,10 +41,12 @@ jobs:
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
         run: |
+          FILE="${{ inputs.file }}"
+          FILE="${FILE:-oneoff_post.txt}"
           if [ "${{ inputs.check_token }}" = "true" ]; then
             python threads_post.py --check-token
           elif [ "${{ inputs.dry_run }}" = "true" ]; then
-            python threads_post.py --custom-file oneoff_post.txt --dry-run
+            python threads_post.py --custom-file "$FILE" --dry-run
           else
-            python threads_post.py --custom-file oneoff_post.txt
+            python threads_post.py --custom-file "$FILE"
           fi
