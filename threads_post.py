@@ -262,7 +262,42 @@ def main() -> None:
         action="store_true",
         help="게시하지 않고 생성된 글만 출력한다 (검증용).",
     )
+    parser.add_argument(
+        "--custom-file",
+        help="이 파일의 텍스트를 그대로 게시한다(AI 생성·요일 게이팅 건너뜀). 컨펌 완료된 원고 1회 발행용.",
+    )
     args = parser.parse_args()
+
+    # ── 컨펌된 커스텀 원고 1회 발행 경로 ─────────────────────────
+    #   파일 첫 줄이 "# DATE: YYYY-MM-DD"면 그 날짜(KST)에만 발행한다.
+    #   → 예약 크론이 매일 돌아도 스케줄된 그날에만 나가고, 지난 원고는 재게시하지 않는다.
+    if args.custom_file:
+        with open(args.custom_file, encoding="utf-8") as f:
+            raw = f.read()
+        lines = raw.split("\n")
+        post_date = None
+        if lines and lines[0].startswith("# DATE:"):
+            post_date = lines[0].split(":", 1)[1].strip()
+            raw = "\n".join(lines[1:])
+        text = strip_emoji(raw.strip())
+        today = datetime.now(KST).strftime("%Y-%m-%d")
+        if post_date and post_date != today:
+            print(f"[스킵] 원고 예약일({post_date}) != 오늘({today}). 발행하지 않고 종료합니다.")
+            return
+        print(f"=== 커스텀 게시 글 (예약일 {post_date or '없음'}) ===")
+        print(text)
+        print(f"=== 글자 수: {len(text)}자 ===")
+        if len(text) > 500:
+            sys.exit(f"[오류] 글이 500자를 초과합니다({len(text)}자). Threads 제한(500자)에 걸립니다.")
+        if args.dry_run:
+            print("(dry-run) 게시하지 않고 종료합니다.")
+            return
+        user_id = require_env("THREADS_USER_ID")
+        access_token = require_env("THREADS_ACCESS_TOKEN")
+        post_id = post_to_threads(user_id, access_token, text)
+        print(f"게시 완료. Threads 게시물 ID: {post_id}")
+        return
+    # ────────────────────────────────────────────────────────
 
     now = datetime.now(KST)
     weekday = now.isoweekday()  # 월=1 ... 일=7

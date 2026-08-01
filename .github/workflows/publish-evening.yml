@@ -1,0 +1,40 @@
+name: 이슬(@ai_leeseul) 컨펌 원고 저녁 예약 발행
+
+# 컨펌 완료된 oneoff_post.txt 를 매일 저녁 9시(KST)에 발행한다.
+# 파일 첫 줄 "# DATE: YYYY-MM-DD" 가 오늘(KST)과 같을 때만 실제 발행되고,
+# 날짜가 지나면 스크립트가 스스로 스킵하므로 지난 원고가 재게시되지 않는다.
+# GitHub 크론은 UTC 기준. 21:00 KST = 12:00 UTC.
+# (무료 러너 특성상 혼잡 시 몇 분~수십 분 늦게 뜰 수 있음)
+on:
+  schedule:
+    - cron: "0 12 * * *"     # 21:00 KST 매일
+  workflow_dispatch:          # 수동 실행 버튼
+    inputs:
+      dry_run:
+        description: "게시하지 않고 검증만"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 컨펌 원고 게시
+        env:
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python threads_post.py --custom-file oneoff_post.txt --dry-run
+          else
+            python threads_post.py --custom-file oneoff_post.txt
+          fi
