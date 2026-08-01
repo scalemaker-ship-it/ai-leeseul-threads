@@ -266,7 +266,29 @@ def main() -> None:
         "--custom-file",
         help="이 파일의 텍스트를 그대로 게시한다(AI 생성·요일 게이팅 건너뜀). 컨펌 완료된 원고 1회 발행용.",
     )
+    parser.add_argument(
+        "--check-token",
+        action="store_true",
+        help="게시하지 않고 THREADS 토큰 유효성만 확인한다(읽기 호출).",
+    )
     args = parser.parse_args()
+
+    # ── 토큰 유효성 확인(게시 없음) ─────────────────────────────
+    if args.check_token:
+        import requests
+
+        user_id = require_env("THREADS_USER_ID")
+        access_token = require_env("THREADS_ACCESS_TOKEN")
+        r = requests.get(
+            f"{THREADS_API}/{user_id}",
+            params={"fields": "username", "access_token": access_token},
+            timeout=30,
+        )
+        print(f"HTTP {r.status_code}: {r.text[:300]}")
+        r.raise_for_status()
+        print(f"토큰 OK — @{r.json().get('username')}")
+        return
+    # ────────────────────────────────────────────────────────
 
     # ── 컨펌된 커스텀 원고 1회 발행 경로 ─────────────────────────
     #   파일 첫 줄이 "# DATE: YYYY-MM-DD"면 그 날짜(KST)에만 발행한다.

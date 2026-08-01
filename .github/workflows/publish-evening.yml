@@ -14,6 +14,10 @@ on:
         description: "게시하지 않고 검증만"
         type: boolean
         default: false
+      check_token:
+        description: "토큰 유효성만 확인(게시 안 함)"
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -33,7 +37,9 @@ jobs:
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ inputs.check_token }}" = "true" ]; then
+            python threads_post.py --check-token
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
             python threads_post.py --custom-file oneoff_post.txt --dry-run
           else
             python threads_post.py --custom-file oneoff_post.txt
