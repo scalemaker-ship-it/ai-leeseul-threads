@@ -208,6 +208,66 @@ def strip_emoji(text: str) -> str:
     return "\n".join(re.sub(r"[ \t]{2,}", " ", line) for line in lines).strip()
 
 
+# ── 가독성용 자연 줄바꿈 ─────────────────────────────────────
+#   스레드는 폭이 좁아 긴 줄이 뭉쳐 보인다. 한 줄을 15자 내외로 끊어
+#   눈에 잘 읽히게 만든다. 어절(띄어쓰기) 단위로만 끊고, 12자를 넘긴
+#   상태에서 문장부호(, . ? !)를 만나면 거기서 자연스럽게 줄을 바꾼다.
+WRAP_MIN = 12   # 이 길이를 넘겨야 문장부호에서 끊는다(너무 잘게 안 쪼갬)
+WRAP_MAX = 16   # 한 줄이 넘지 않는 최대 길이 → 체감 "15자 내외"
+_NUM_ITEM_RE = re.compile(r"^\s*\d+\.\s")
+
+
+def _wrap_line(line: str) -> str:
+    """한 논리 줄을 어절 단위로 15자 내외로 감싼다."""
+    words = line.split(" ")
+    out, cur = [], ""
+    for w in words:
+        while len(w) > WRAP_MAX:            # 한 어절이 너무 길면 강제 분할(드묾)
+            if cur:
+                out.append(cur); cur = ""
+            out.append(w[:WRAP_MAX]); w = w[WRAP_MAX:]
+        cand = w if not cur else cur + " " + w
+        if len(cand) <= WRAP_MAX:
+            cur = cand
+            if len(cur) >= WRAP_MIN and cur[-1] in ",.?!":   # 문장부호에서 자연 줄바꿈
+                out.append(cur); cur = ""
+        else:
+            if cur:
+                out.append(cur)
+            cur = w
+    if cur:
+        out.append(cur)
+    return "\n".join(out)
+
+
+def wrap_for_threads(text: str) -> str:
+    """글을 15자 내외로 자연 줄바꿈한다.
+
+    - 빈 줄로 나뉜 문단마다, 안의 줄들을 다시 이어붙여(리플로우) 15자 내외로 감싼다.
+      → 이미 손으로 줄바꿈된 글을 다시 넣어도 외톨이 조각이 안 생긴다.
+    - 번호 항목(1. 2. 3.)은 각각 별도 유닛으로 떼어 그 사이에 빈 줄을 넣는다(가독성).
+    """
+    blocks = []
+    for para in re.split(r"\n\s*\n", text.strip()):
+        if not para.strip():
+            continue
+        units, cur = [], ""
+        for raw in para.split("\n"):
+            line = raw.strip()
+            if not line:
+                continue
+            if _NUM_ITEM_RE.match(line):     # 번호 항목 = 새 유닛 시작
+                if cur:
+                    units.append(cur)
+                cur = line
+            else:                            # 이어지는 줄은 리플로우로 합침
+                cur = line if not cur else cur + " " + line
+        if cur:
+            units.append(cur)
+        blocks.append("\n\n".join(_wrap_line(u) for u in units))
+    return "\n\n".join(blocks)
+
+
 def generate_post(user_message: str) -> str:
     """Claude로 글을 생성한다. (API 키 없으면 예외)"""
     import anthropic
@@ -301,7 +361,7 @@ def main() -> None:
         if lines and lines[0].startswith("# DATE:"):
             post_date = lines[0].split(":", 1)[1].strip()
             raw = "\n".join(lines[1:])
-        text = strip_emoji(raw.strip())
+        text = wrap_for_threads(strip_emoji(raw.strip()))
         today = datetime.now(KST).strftime("%Y-%m-%d")
         if post_date and post_date != today:
             print(f"[스킵] 원고 예약일({post_date}) != 오늘({today}). 발행하지 않고 종료합니다.")
@@ -338,7 +398,7 @@ def main() -> None:
         user_id = require_env("THREADS_USER_ID")
         access_token = require_env("THREADS_ACCESS_TOKEN")
 
-    text = generate_post(user_message)
+    text = wrap_for_threads(generate_post(user_message))
     print("=== 생성된 글 ===")
     print(text)
     print(f"=== 글자 수: {len(text)}자 ===")
