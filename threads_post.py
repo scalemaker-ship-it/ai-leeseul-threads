@@ -10,6 +10,7 @@ AI 활용 팁·노하우를 존댓말 정보형으로 매일 저녁 1개 발행�
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -19,6 +20,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
+
+# ─────────────────────────────────────────────────────────────
+# 미리작성 큐 발행 (2026-09-04 전환, 크레딧 0으로 동작)
+#   우선순위: --custom-file(오늘 DATE인 oneoff는 publish-evening 담당)
+#            > queue.json 순서 발행 > (큐 소진 시 실패로 알림)
+#   posted_log.json 에 발행 기록을 남겨 같은 날 중복 발행을 차단한다.
+# ─────────────────────────────────────────────────────────────
+_HERE = os.path.dirname(os.path.abspath(__file__))
+QUEUE_FILE = os.path.join(_HERE, "queue.json")
+LOG_FILE = os.path.join(_HERE, "posted_log.json")
+ONEOFF_FILE = os.path.join(_HERE, "oneoff_post.txt")
 MODEL = "claude-opus-4-8"
 THREADS_API = "https://graph.threads.net/v1.0"
 
@@ -268,6 +280,53 @@ def wrap_for_threads(text: str) -> str:
     return "\n\n".join(blocks)
 
 
+def _load_json(path: str, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+
+
+def pick_from_queue(today_str: str):
+    """오늘 발행할 큐 항목을 고른다.
+
+    반환: (item, reason) — item이 None이면 reason이 스킵/소진 사유.
+    - 오늘 이미 발행 기록이 있으면 중복 발행하지 않는다(크론 재실행 안전).
+    - 발행 안 된 항목 중 큐 앞에서부터 하나를 고른다.
+    """
+    queue = _load_json(QUEUE_FILE, [])
+    log = _load_json(LOG_FILE, [])
+    if any(e.get("date") == today_str for e in log):
+        return None, f"오늘({today_str})은 이미 발행됨(posted_log.json)"
+    posted_ids = {e.get("id") for e in log}
+    for item in queue:
+        if item.get("id") not in posted_ids:
+            remaining = sum(1 for i in queue if i.get("id") not in posted_ids)
+            if remaining <= 3:
+                print(f"[경고] 큐 잔량 {remaining}편 — queue.json 을 채워주세요.")
+            return item, None
+    return None, "큐 소진(queue.json 의 모든 글이 발행됨)"
+
+
+def append_posted_log(entry: dict) -> None:
+    log = _load_json(LOG_FILE, [])
+    log.append(entry)
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def oneoff_scheduled_today(today_str: str) -> bool:
+    """oneoff_post.txt 첫 줄이 오늘 DATE면 True — 그날은 publish-evening 이 담당."""
+    try:
+        with open(ONEOFF_FILE, encoding="utf-8") as f:
+            first = f.readline()
+    except FileNotFoundError:
+        return False
+    return first.startswith("# DATE:") and first.split(":", 1)[1].strip() == today_str
+
+
 def generate_post(user_message: str) -> str:
     """Claude로 글을 생성한다. (API 키 없으면 예외)"""
     import anthropic
@@ -383,11 +442,45 @@ def main() -> None:
 
     now = datetime.now(KST)
     weekday = now.isoweekday()  # 월=1 ... 일=7
-    topic = TOPICS.get(weekday)
-    if topic is None:
+    today_str = now.strftime("%Y-%m-%d")
+    if weekday == 7:
         print(f"오늘({now:%Y-%m-%d %A})은 게시일이 아닙니다(일요일 쉼). 종료합니다.")
         return
 
+    # ── 미리작성 큐 발행 경로 (기본, 크레딧 0) ─────────────────
+    if oneoff_scheduled_today(today_str):
+        print(f"[스킵] oneoff_post.txt 가 오늘({today_str}) 예약돼 있어 publish-evening 에 맡깁니다.")
+        return
+
+    item, reason = pick_from_queue(today_str)
+    if item is None and reason and "이미 발행" in reason:
+        print(f"[스킵] {reason}")
+        return
+    if item is not None:
+        text = wrap_for_threads(strip_emoji(item["text"].strip()))
+        print(f"[{now:%Y-%m-%d %H:%M KST}] 큐 발행: {item['id']} ({item.get('type','?')}) {item.get('title','')}")
+        print("=== 게시할 글 ===")
+        print(text)
+        print(f"=== 글자 수: {len(text)}자 ===")
+        if len(text) > 500:
+            sys.exit(f"[오류] 글이 500자를 초과합니다({len(text)}자). queue.json 의 {item['id']} 를 줄여주세요.")
+        if args.dry_run:
+            print("(dry-run) 게시하지 않고 종료합니다.")
+            return
+        user_id = require_env("THREADS_USER_ID")
+        access_token = require_env("THREADS_ACCESS_TOKEN")
+        post_id = post_to_threads(user_id, access_token, text)
+        append_posted_log({"date": today_str, "id": item["id"], "post_id": post_id})
+        print(f"게시 완료. Threads 게시물 ID: {post_id}")
+        return
+
+    # 큐 소진 — Claude 생성 폴백은 명시적으로 허용했을 때만(크레딧 소모 방지).
+    if os.environ.get("ALLOW_CLAUDE_FALLBACK") != "1":
+        sys.exit(f"[오류] {reason}. queue.json 을 채워주세요. "
+                 "(Claude 생성 폴백을 쓰려면 ALLOW_CLAUDE_FALLBACK=1)")
+    # ────────────────────────────────────────────────────────
+
+    topic = TOPICS.get(weekday)
     sub, cta, user_message = build_user_message(topic, now, weekday)
     print(f"[{now:%Y-%m-%d %H:%M KST}] 주제: {topic['name']} / 소재: {sub}")
     print(f"  CTA: {cta}")
@@ -408,6 +501,7 @@ def main() -> None:
         return
 
     post_id = post_to_threads(user_id, access_token, text)
+    append_posted_log({"date": now.strftime("%Y-%m-%d"), "id": "claude-fallback", "post_id": post_id})
     print(f"게시 완료. Threads 게시물 ID: {post_id}")
 
 

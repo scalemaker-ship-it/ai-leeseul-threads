@@ -1,16 +1,37 @@
 # 이슬(@ai_leeseul) 스레드 자동화
 
-**AI 마케팅 자동화** 팁·노하우를 **존댓말 정보형**으로 매일 저녁 1개 발행하고,
-일부 글에는 **스케일메이커 AI 마케팅 자동화 강의**로 향하는 담백한 CTA를 자연스럽게 얹는 자동화입니다.
+**사업하는 이야기(story) + AI 꿀팁(tip)** 을 교대로, **존댓말**로 매일 저녁 1개 발행합니다.
+일부 글 끝에 **무료 전자책 CTA**(댓글 '자동화' + 프로필 링크)를 담백하게 얹습니다.
 
 > 오산·빵찌·0ra 자동화와 **완전히 분리된 별도 저장소·Meta 앱·계정**입니다.
+
+## 발행 방식 — 미리작성 큐 (2026-09-04 전환, 크레딧 0)
+
+우선순위: **oneoff_post.txt(오늘 DATE 예약, publish-evening 담당) > queue.json 순서 발행**.
+Claude 생성은 `ALLOW_CLAUDE_FALLBACK=1` 일 때만 폴백으로 동작합니다(평소 크레딧 0).
+
+- `queue.json` — 미리 써둔 글 목록. `{id, type(story|tip), title, text}` 순서대로 발행.
+  **story(사업 이야기)와 tip(AI 꿀팁)을 교대로** 배치한다. 이모지 0, 250~450자,
+  줄바꿈은 발행 때 `wrap_for_threads()` 가 15자 내외로 자동 처리하니 plain 문단으로 쓰면 된다.
+- `posted_log.json` — 발행 기록 `{date, id, post_id}`. 같은 날 중복 발행 차단.
+  워크플로가 발행 후 자동 커밋한다. **로컬 작업 전 `git pull` 필수.**
+- 큐가 소진되면 워크플로가 **실패(빨간불)** 로 끝난다 = 큐 채울 때라는 신호.
+  잔량 3편 이하부터 로그에 경고가 찍힌다.
+
+### 큐 채우기
+
+새 글을 `queue.json` 끝에 story/tip 교대로 추가하고 커밋하면 끝.
+검증: `python threads_post.py --dry-run` (오늘 나갈 글과 글자 수 확인).
 
 ## 구조
 
 | 파일 | 역할 |
 |---|---|
-| `threads_post.py` | 요일로 주제 선택 → 날짜 시드로 소재·홍보 여부 결정 → Claude 생성 → 이모지 제거 → Threads 게시 |
-| `.github/workflows/threads-daily.yml` | **하루 1회**(저녁) 크론, 랜덤 지연 포함 |
+| `queue.json` | 미리작성 발행 큐 (story/tip 교대) |
+| `posted_log.json` | 발행 기록 (중복 차단, 워크플로가 커밋) |
+| `threads_post.py` | 큐에서 다음 글 선택 → 이모지 제거·15자 줄바꿈 → Threads 게시 |
+| `.github/workflows/threads-daily.yml` | **하루 1회**(저녁) 크론, 랜덤 지연 + 기록 커밋 |
+| `.github/workflows/publish-evening.yml` | 컨펌 원고(oneoff_post.txt) 날짜 예약 발행 |
 | `docs/글쓰기_가이드.md` | 톤·구조·금지 규칙 |
 | `requirements.txt` | anthropic, requests |
 
