@@ -1,0 +1,34 @@
+name: 이슬(@ai_leeseul) 영상 스레드 원샷 게시
+
+# 수동 실행 전용. 공개 영상 URL + video_posts/ 의 글 파일로 영상 스레드 1건을 게시한다.
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: "공개 영상 URL (mp4)"
+        type: string
+        required: true
+      text_file:
+        description: "글 파일 경로 (video_posts/...)"
+        type: string
+        required: true
+      dry_run:
+        description: "게시하지 않고 검증만"
+        type: boolean
+        default: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: 영상 스레드 게시
+        env:
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+        run: |
+          python post_video.py --video-url "${{ inputs.video_url }}" --text-file "${{ inputs.text_file }}" ${{ inputs.dry_run && '--dry-run' || '' }}
