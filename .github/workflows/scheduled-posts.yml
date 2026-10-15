@@ -1,0 +1,64 @@
+name: 이슬(@ai_leeseul) 날짜 예약 원고 발행
+
+# scheduled/*.txt 중 첫 줄 "# DATE:" 가 오늘(KST)인 원고 1건을 저녁에 발행한다.
+# 크론 2개(20:00, 22:00 KST)는 지연 대비 안전망 — posted_log.json 으로 중복 발행 차단.
+on:
+  schedule:
+    - cron: "0 11 * * *"   # 20:00 KST
+    - cron: "0 13 * * *"   # 22:00 KST (첫 크론이 안 떴을 때)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "게시하지 않고 검증만"
+        type: boolean
+        default: false
+      check_token:
+        description: "토큰 유효성만 확인"
+        type: boolean
+        default: false
+
+concurrency:
+  group: scheduled-posts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: 랜덤 지연 (0~30분)
+        if: github.event_name == 'schedule'
+        run: sleep $((RANDOM % 1800))
+
+      - name: 예약 원고 발행
+        env:
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+        run: |
+          git pull -q origin main
+          if [ "${{ inputs.check_token }}" = "true" ]; then
+            python threads_post.py --check-token
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            python post_scheduled.py --dry-run
+          else
+            python post_scheduled.py
+          fi
+
+      - name: 발행 기록 커밋
+        if: ${{ inputs.dry_run != true && inputs.check_token != true }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add posted_log.json
+          git diff --cached --quiet && exit 0
+          git commit -m "예약 발행 기록: $(TZ=Asia/Seoul date +%F)"
+          git pull --rebase origin main
+          git push origin main
